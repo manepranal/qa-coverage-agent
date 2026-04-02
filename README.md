@@ -2,169 +2,169 @@
 
 CLI tools that automatically check how many test cases on a YouTrack QA test plan board are covered by BE and FE implementation tickets — and clearly shows which are not.
 
----
+## Tools
 
-## What's Included
+| Alias | Script | Purpose |
+|-------|--------|---------|
+| `coverage` | `coverage_check.py` | **Primary tool.** Board URL → test cases → epic → impl PRs → coverage report |
+| `qaupdate` | `update_tickets.py` | Board URL → dry-run plan → confirm → post comments + move tickets to Pass/Fail |
+| `qacov` | `qa_coverage.py` | Test plan ticket → parent epic → impl PRs → scenario-level report |
+| `epicov` | `epic_coverage.py` | Epic → sub-issues → PRs → test plan board cross-reference |
 
-| File | Alias | Purpose |
-|------|-------|---------|
-| `coverage_check.py` | `coverage` | **Primary tool.** Board URL → test cases → epic → impl PRs → coverage report |
-| `epic_coverage.py` | `epicov` | Epic → all sub-issues → PRs → test plan board cross-reference |
-| `qa_coverage.py` | `qacov` | Test plan ticket → parent epic → impl PRs → scenario-level report |
-| `requirements.txt` | — | Python dependencies (`requests`, `rich`) |
-| `setup.sh` | — | One-time setup script |
-| `.env.example` | — | Template for environment variables |
+## Quick Start
 
----
-
-## Setup (One Time)
-
-### 1. Clone the repo
+### 1. Install dependencies
 
 ```bash
-git clone https://github.com/manepranal/qa-coverage-agent.git ~/coverage-check-agent
+pip3 install -r requirements.txt
 ```
 
-### 2. Install dependencies
+### 2. Set environment variables
+
+Add to your `~/.zshrc`:
 
 ```bash
-pip3 install -r ~/coverage-check-agent/requirements.txt
-```
-
-### 3. Set tokens + aliases
-
-Add to your `~/.zshrc` (or `~/.bashrc`):
-
-```bash
-export YOUTRACK_TOKEN=your_youtrack_permanent_token
-export GITHUB_TOKEN=your_github_personal_access_token
+export YOUTRACK_TOKEN=your_token_here
+export GITHUB_TOKEN=your_token_here
 
 alias coverage="python3 ~/coverage-check-agent/coverage_check.py"
+alias qaupdate="python3 ~/coverage-check-agent/update_tickets.py"
 alias qacov="python3 ~/coverage-check-agent/qa_coverage.py"
 alias epicov="python3 ~/coverage-check-agent/epic_coverage.py"
 ```
 
 Then reload: `source ~/.zshrc`
 
-Or just run the setup script:
+Or run the setup script:
 
 ```bash
-bash ~/coverage-check-agent/setup.sh
+bash setup.sh
 ```
-
-### Where to get tokens
-
-| Token | Where |
-|-------|-------|
-| `YOUTRACK_TOKEN` | YouTrack → Profile → Hub → Authentication → Permanent tokens |
-| `GITHUB_TOKEN` | GitHub → Settings → Developer settings → Personal access tokens (`repo` scope) |
 
 ---
 
-## Tool 1: `coverage` — Board Coverage Checker
+## `coverage` — Board Coverage Checker
 
-The **primary tool**. Give it a QA board URL or ID — it auto-detects the epic, fetches all BE/FE implementation tickets, checks GitHub PRs, and prints a full coverage report.
+The **primary tool**. Accepts a QA board URL or ID, auto-detects the epic from the board name, fetches all implementation sub-issues, checks GitHub PRs, and outputs a clean two-table report.
 
 ```bash
-# Full board URL
+# Full URL
 coverage https://realbrokerage.youtrack.cloud/agiles/124-416
 
 # Board ID only
 coverage 124-416
 
-# Override epic if board name doesn't contain the epic ID
+# Override epic (if board name doesn't contain the epic ID)
 coverage 124-416 --epic RV2-61965
 ```
 
-### What it outputs
+### Output
 
 - **Board info panel** — board name + current sprint
 - **Epic panel** — epic summary + sub-issue count
-- **COVERED table** — test cases that have BE/FE implementation PRs
-- **NOT COVERED table** — test cases missing implementation PRs
-- **IMPLEMENTATION TICKETS table** — all BE/FE sub-issues with PR status (Merged / Open / No PR)
+- **COVERED table** — test cases where BE/FE PRs exist
+- **NOT COVERED / BLOCKED table** — test cases missing implementation
+- **IMPLEMENTATION TICKETS table** — all BE/FE sub-issues with PR status
 - **Coverage Summary** — counts, percentages, and list of remaining gaps
 
-### How coverage is determined
+### How it classifies
 
-**Test cases** on the board are classified as `BE`, `FE`, or `E2E` based on keywords in the title.
+**Test cases** are classified as `BE`, `FE`, or `E2E` based on keywords in the ticket summary.
 
-**Implementation tickets** from the epic are classified as:
-- `BE` — keywords: `[be]`, `be:`, `backend`, `api`, `service`, `java`, `yenta`
-- `FE` — keywords: `[fe]`, `fe:`, `bolt:`, `frontend`, `playwright`, `react`, `typescript`
-- `BE+FE` — both match
+**Implementation tickets** are classified by their summary:
+- `BE`: keywords like `[be]`, `be:`, `backend`, `api`, `service`, `java`
+- `FE`: keywords like `[fe]`, `fe:`, `bolt:`, `frontend`, `playwright`, `react`
+- `BE+FE`: both sets match
 
-**A test case is covered if** its required BE and/or FE implementation ticket has at least one PR (any state — open, draft, or merged). The YouTrack Stage field does not affect coverage.
+A test case is **covered** if:
+- Its required BE implementation has at least one PR (any state)
+- Its required FE implementation has at least one PR (any state)
 
 ---
 
-## Tool 2: `epicov` — Epic Coverage Checker
+## `qaupdate` — Comment + Move Tickets to Pass/Fail
 
-Given an epic ID, lists all sub-issues with their GitHub PR status and cross-references the QA test plan board.
+After running `coverage`, use this tool to **automatically post comments and update the Stage** of every test case ticket on the board.
 
 ```bash
-epicov RV2-61965
-epicov RV2-61965 --board 124-416
+# Show a dry-run plan (no changes made)
+qaupdate 124-416 --dry-run
+
+# Full URL also works
+qaupdate https://realbrokerage.youtrack.cloud/agiles/124-416
+
+# Only update covered tickets (move to Pass; skip uncovered)
+qaupdate 124-416 --covered-only
+
+# Override epic if board name does not contain the epic ID
+qaupdate 124-416 --epic RV2-61965
 ```
 
-### What it outputs
+### What it does
 
-- All sub-issues with type (BE / FE), state, and GitHub PRs
-- PR status: Merged / Open / Draft / No PR
-- Summary by type: BE X/Y merged, FE X/Y merged
-- Linked QA test plan tickets (if any board tickets reference these sub-issues)
+1. Fetches all test cases from the board's current sprint
+2. Looks up implementation PRs for each BE/FE sub-issue of the epic
+3. Determines coverage (same logic as `coverage`)
+4. Shows a **dry-run plan table**: ticket, type, current stage, new stage, comment preview
+5. Asks for confirmation before making any changes
+6. Posts a tailored comment and moves Stage to `Pass` or `Fail`:
+
+| Ticket type | Covered comment | Not covered comment |
+|-------------|-----------------|---------------------|
+| BE | PR info + "Required implementation PR exists. QA testing can proceed." | "No BE PR found" |
+| FE | PR info + "Required implementation PR exists. QA testing can proceed." | "No FE PR found" |
+| E2E | BE + FE PR info + "All required BE and FE implementation PRs exist." | Missing PR details |
 
 ---
 
-## Tool 3: `qacov` — Test Plan Ticket Coverage
+## `qacov` — Test Plan Ticket Coverage
 
-Starts from a specific test plan ticket, finds its parent epic, and maps each test scenario to its implementation PRs.
+Starts from a specific test plan ticket, finds its parent epic, and maps each test scenario to the corresponding implementation PRs.
 
 ```bash
-qacov RV2-12345
 qacov https://realbrokerage.youtrack.cloud/issue/RV2-12345
-qacov RV2-12345 --epic RV2-10000   # override parent if auto-detection fails
+qacov RV2-12345
+qacov RV2-12345 --epic RV2-10000   # override if parent detection fails
 ```
 
 ---
 
-## GitHub Repos Searched
+## `epicov` — Epic Coverage Checker
 
-| Repo | Stack |
-|------|-------|
-| `Realtyka/bolt` | FE — TypeScript / React / Playwright |
-| `manepranal/bolt-rest-assured` | BE — Java / REST Assured |
+Starts from an epic ID, lists all BE/FE sub-issues with PR status, and cross-references the QA test plan board to find linked test tickets.
 
-PR search also reads the **Pull Request** custom field on YouTrack tickets (catches PRs in repos like `Realtyka/yenta` that are linked directly in YouTrack).
+```bash
+epicov RV2-12345
+epicov RV2-12345 --board 124-416
+```
 
 ---
 
-## YouTrack Board Structure Expected
+## GitHub repos searched
+
+- `Realtyka/bolt` — FE (TypeScript / React / Playwright)
+- `manepranal/bolt-rest-assured` — BE (Java / REST Assured)
+
+PR search looks for the YouTrack ticket ID (e.g. `RV2-12345`) in PR titles, bodies, and branch names.
+
+## YouTrack board structure assumed
 
 ```
-Agile Board (e.g. 124-416)
-  └── Sprint issues (QA project tickets, Type = "Test")
-        └── Stage: Ready / In Progress / Blocked / Pass / Fail
+Agile Board (124-416)
+  └── Sprint issues (QA project tickets)
+        └── Type = "Test" → test cases
+              Stage: Open / In Progress / Blocked / Done
 
-Board name format: QA_RV2-XXXXX_FeatureName
-  └── Epic ID (RV2-XXXXX) is auto-extracted from the board name
-
-Epic (RV2-XXXXX)
+Epic (RV2-XXXXX)  ← extracted from board name e.g. QA_RV2-61965_Feature
   └── Sub-issues
-        ├── [BE] tickets  → searched in bolt-rest-assured + yenta
-        ├── [FE] / Bolt:  → searched in bolt
-        └── Test Plan tickets
+        ├── [BE] ticket → search bolt-rest-assured PRs
+        ├── [FE] / Bolt: ticket → search bolt PRs
+        └── Test Plan ticket → sub-issues = test scenarios
 ```
 
----
+## Auth tokens
 
-## Time Saved
-
-Without this tool a QA engineer has to:
-1. Open every test case on the board
-2. Find the linked epic
-3. Check each sub-issue in the epic
-4. Open GitHub and search for PRs per ticket
-5. Manually track what's covered vs not
-
-With this tool: **one command, full coverage report in ~30 seconds.**
+| Token | Where to get it |
+|-------|------------------|
+| `YOUTRACK_TOKEN` | YouTrack → Profile → Hub → Authentication → Permanent tokens |
+| `GITHUB_TOKEN` | GitHub → Settings → Developer settings → Personal access tokens (needs `repo` scope) |
