@@ -21,6 +21,7 @@ Examples:
 
 import argparse
 import os
+import re
 import sys
 
 import requests
@@ -42,8 +43,8 @@ YOUTRACK_TOKEN = os.environ.get("YOUTRACK_TOKEN", "")
 GITHUB_TOKEN   = os.environ.get("GITHUB_TOKEN", "")
 
 # Keywords to classify sub-issues as BE or FE
-BE_KEYWORDS = ["[be]", "be -", "be:", "backend", "api", "rest", "service", "server"]
-FE_KEYWORDS = ["[fe]", "fe -", "fe:", "frontend", "ui", "playwright", "e2e", "react", "web"]
+BE_KEYWORDS = ["[be]", "be -", "be:", "be :", "backend", "api", "rest", "service", "server", "endpoint", "yenta", "sherlock", "java"]
+FE_KEYWORDS = ["[fe]", "fe -", "fe:", "fe :", "bolt:", "bolt -", "bolt :", "frontend", "ui", "playwright", "e2e", "react", "web", "typescript", "component"]
 
 console = Console()
 
@@ -61,18 +62,18 @@ def yt_get(path, params=None):
 
 
 def fetch_epic(epic_id):
-    """Fetch the epic with all its sub-issues and their details."""
-    return yt_get(
+    """Fetch the epic and all its sub-issues via search query."""
+    epic = yt_get(
         f"/issues/{epic_id}",
-        {
-            "fields": (
-                "id,idReadable,summary,description,state(name),"
-                "subtasks(id,idReadable,summary,state(name),type(name),"
-                "  links(direction,issues(id,idReadable,summary),linkType(name))),"
-                "links(direction,issues(id,idReadable,summary,state(name)),linkType(name,targetToSource,sourceToTarget))"
-            )
-        },
+        {"fields": "id,idReadable,summary,state(name)"},
     )
+    subs = yt_get("/issues", {
+        "query": f"subtask of: {epic_id}",
+        "fields": "id,idReadable,summary,state(name),customFields(name,value(name,text))",
+        "$top": 200,
+    })
+    epic["subtasks"] = subs if isinstance(subs, list) else []
+    return epic
 
 
 def fetch_board_issues(agile_id, board_name):
@@ -105,6 +106,16 @@ def get_linked_ticket_ids(issue):
             if tid:
                 ids.add(tid)
     return ids
+
+
+def get_custom_field(issue, field_name):
+    for f in (issue.get("customFields") or []):
+        if f.get("name", "").lower() == field_name.lower():
+            val = f.get("value")
+            if isinstance(val, dict):
+                return val.get("name") or val.get("text", "")
+            return str(val) if val is not None else None
+    return None
 
 
 # ── GitHub helpers ────────────────────────────────────────────────────────────
@@ -255,9 +266,20 @@ def main():
         summary = sub.get("summary", "")
         state   = (sub.get("state") or {}).get("name", "?")
         stype   = classify(summary)
+        pr_field = get_custom_field(sub, "Pull Request") or ""
 
         console.print(f"  [cyan]{tid}[/cyan] [{stype}] — searching PRs...", end="")
         prs = search_prs_for_ticket(tid)
+
+        # Also extract PRs from the YouTrack Pull Request custom field
+        if pr_field and pr_field.lower() not in ("na", "n/a", "see dev notes", ""):
+            urls = re.findall(r'https?://github\.com/[^/]+/([^/]+)/pull/(\d+)', pr_field)
+            for repo_name, pr_num in urls:
+                if not any(p["number"] == int(pr_num) for p in prs):
+                    prs.append({"repo": repo_name, "number": int(pr_num),
+                                "url": pr_field.strip(), "state": "open",
+                                "merged": False, "draft": False})
+
         console.print(f" {len(prs)} PR(s) found")
 
         rows.append({

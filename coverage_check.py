@@ -335,7 +335,7 @@ def main():
         fe_needed = (cat != "BE")
         be_ok     = (not be_needed) or be_has_pr
         fe_ok     = (not fe_needed) or fe_has_pr
-        is_covered = (stage != "Blocked") and be_ok and fe_ok
+        is_covered = be_ok and fe_ok
         row = {**tc, "be_needed": be_needed, "fe_needed": fe_needed, "covered": is_covered}
         (covered_rows if is_covered else blocked_rows).append(row)
 
